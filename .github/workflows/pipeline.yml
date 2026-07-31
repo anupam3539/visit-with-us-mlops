@@ -1,0 +1,62 @@
+name: Tourism MLOps Pipeline
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["tourism_project/deployment/tourism_model.joblib"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  register-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r tourism_project/requirements.txt
+      - run: python tourism_project/model_building/data_register.py
+      - uses: actions/upload-artifact@v4
+        with: {name: registered-data, path: tourism_project/data/tourism.csv}
+  prepare-data:
+    needs: register-data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r tourism_project/requirements.txt
+      - run: python tourism_project/model_building/prep.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: data-splits
+          path: |
+            Xtrain.csv
+            Xtest.csv
+            ytrain.csv
+            ytest.csv
+  train-evaluate-deploy:
+    needs: prepare-data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r tourism_project/requirements.txt
+      - uses: actions/download-artifact@v4
+        with: {name: data-splits, path: .}
+      - run: python tourism_project/model_building/train.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model-and-metrics
+          path: |
+            tourism_project/deployment/tourism_model.joblib
+            model_metrics.json
+            best_parameters.json
+            tuning_results.csv
+      - name: Commit best model to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tourism_project/deployment/tourism_model.joblib
+          git diff --cached --quiet || git commit -m "chore: update trained model [skip ci]"
+          git push
